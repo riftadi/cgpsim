@@ -1,0 +1,21 @@
+import drop_heavy_hitters
+import drop_ddos
+import drop_superspreader
+
+define intent dropDDoS:
+  to     any
+  for    traffic('any')
+  apply  drop_ddos
+  with   threshold('more',5)
+
+define intent dropSS:
+  to     any
+  for    traffic('any')
+  apply  drop_superspreader
+  with   threshold('more',5)
+
+define intent dropHeavyHitters:
+  to     any
+  for    traffic('any')
+  apply  drop_heavy_hitters
+  with   threshold('more',20)
