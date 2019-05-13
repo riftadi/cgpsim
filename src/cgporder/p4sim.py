@@ -211,23 +211,23 @@ class PacketGenerator:
         packets = []
 
         for _ in range(self._n_seed):
-            src_ip = int_to_ip(random.randint(0, MAX_IP_ADDR)-1)
-            dst_ip = int_to_ip(random.randint(0, MAX_IP_ADDR)-1)
-            src_port = random.randint(0, MAX_PORT_NUM)-1
-            dst_port = random.randint(0, MAX_PORT_NUM)-1
+            src_ip = int_to_ip(random.randint(0, MAX_IP_ADDR - 1))
+            dst_ip = int_to_ip(random.randint(0, MAX_IP_ADDR - 1))
+            src_port = random.randint(0, MAX_PORT_NUM - 1)
+            dst_port = random.randint(0, MAX_PORT_NUM - 1)
             self._src_ips.append(src_ip)
             self._dst_ips.append(dst_ip)
             self._src_ports.append(src_port)
             self._dst_ports.append(dst_port)
 
         for _ in range(n_pkt):
-            src_ip = self._src_ips[random.randint(0, self._n_seed)-1]
-            dst_ip = self._dst_ips[random.randint(0, self._n_seed)-1]
+            src_ip = self._src_ips[random.randint(0, self._n_seed - 1)]
+            dst_ip = self._dst_ips[random.randint(0, self._n_seed - 1)]
             proto = TCP
-            if random.randint(0, self._n_seed) % 2 == 1:
+            if random.randint(0, self._n_seed - 1) % 2 == 1:
                 proto = UDP
-            src_port = self._src_ports[random.randint(0, self._n_seed)-1]
-            dst_port = self._dst_ports[random.randint(0, self._n_seed)-1]
+            src_port = self._src_ports[random.randint(0, self._n_seed - 1)]
+            dst_port = self._dst_ports[random.randint(0, self._n_seed - 1)]
 
             pkt = Packet(src_ip, dst_ip, proto, src_port, dst_port)
             packets.append(pkt)
