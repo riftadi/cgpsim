@@ -396,12 +396,15 @@ class Phenotype:
         sim = SwitchSimulator(nodes)
 
         if not sim.passed_if_analysis():
-            return -9
+            return -1.0
 
         for ex_pair in self.exam_mgr.example_pairs:
             ex_in, ex_out = ex_pair
             if sim.get_output(ex_in) == ex_out:
-                fitness_value += 10
+                if NF_MODE == MODE_NAT:
+                    fitness_value += 0.25
+                elif NF_MODE == MODE_HH:
+                    fitness_value += 0.5
 
         return fitness_value
 
@@ -502,11 +505,13 @@ class CGPSimulator:
                 exam_fname = "ex_hh.json"
         self.exam_mgr = ExamplesManager(exam_fname)
         self.phenotypes = create_phenotypes(n_phenotypes, self.exam_mgr)
+        self.max_fitness_value = 0
 
 
     def evaluate_generation(self) -> None:
         for ind in self.phenotypes:
             fitness_value = ind.eval()
+            self.max_fitness_value = max(self.max_fitness_value, fitness_value)
             ind.set_fitness(fitness_value)
 
     def evolve_generations(self, n_generations: int) -> None:
@@ -515,6 +520,10 @@ class CGPSimulator:
 
             f_vals = [ind.fitness for ind in self.phenotypes]
             print(f"Gen {gen_idx+1}: {f_vals}")
+
+            if abs(self.max_fitness_value - 1.0) < 0.0001:
+                print("Perfect solution found!")
+                break
 
             # evolve if not the last generation
             if gen_idx < (n_generations - 1):
@@ -529,6 +538,6 @@ class CGPSimulator:
         fittest_phenotype = inds[-1]
 
         print("\nFinal P4 code (fitness value "
-                f"f={fittest_phenotype.fitness}):\n")
+                f"f={fittest_phenotype.fitness}/1.0):\n")
         print(fittest_phenotype)
         print()
