@@ -5,7 +5,7 @@ import cgp
 
 def main():
     cg_sim = cgp.CGPSimulator(10)
-    cg_sim.evolve_generations(20)
+    cg_sim.evolve_generations(500)
     cg_sim.print_fittest_phenotype()
 
 

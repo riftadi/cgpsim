@@ -12,9 +12,15 @@ import json
 VERBOSE = False
 MAX_ARITY = 2
 
-MODE_NAT = 100
-MODE_HH  = 200
-NF_MODE  = MODE_NAT
+MODE_NAT      = 100
+MODE_HH       = 200
+MODE_HALF_NAT = 300
+NF_MODE  = MODE_HH
+
+FV_NOT_PASSED = -1.0
+FV_HH         = 0.5
+FV_NAT        = 0.25
+FV_HALF_NAT   = 0.5
 
 # parameters of cartesian genetic programming
 # MUT_PB = 0.015  # mutate probability
@@ -62,17 +68,24 @@ INPUT_TXT_NAT = {
                 0 : "input_port",
                 1 : "src_ip",
                 2 : "dst_ip",
-                3 : "nat_src_inside_ip",
-                4 : "nat_src_outside_ip",
-                5 : "nat_port_num_inside",
-                6 : "nat_port_num_outside",
+                3 : "NAT_SRC_INSIDE_IP",
+                4 : "NAT_SRC_OUTSIDE_IP",
+                5 : "NAT_PORT_NUM_INSIDE",
+                6 : "NAT_PORT_NUM_OUTSIDE",
+}
+
+INPUT_TXT_HALF_NAT = {
+                0 : "src_ip",
+                1 : "dst_ip",
+                2 : "NAT_SRC_INSIDE_IP",
+                3 : "NAT_SRC_OUTSIDE_IP",
 }
 
 INPUT_TXT_HH = {
                 0 : "src_ip",
                 1 : "dst_ip",
                 2 : "n_seen",
-                3 : "limit",
+                3 : "LIMIT",
 }
 
 EXTRA_INPUTS = {
@@ -114,6 +127,22 @@ class NATExamOutput(NATExamElement):
                )
 
 
+class HalfNATExamInput(NATExamElement):
+    def __init__(self, src_ip, dst_ip):
+        super().__init__(src_ip, dst_ip)
+
+
+class HalfNATExamOutput(NATExamElement):
+    def __init__(self, src_ip, dst_ip):
+        super().__init__(src_ip, dst_ip)
+
+    def __eq__(self, other):
+        return (
+                    self.src_ip == other.src_ip and
+                    self.dst_ip == other.dst_ip
+               )
+
+
 class HHExamInput:
     def __init__(self, src_ip, dst_ip, n_seen):
         self.src_ip = src_ip
@@ -141,6 +170,14 @@ class ExamplesManager:
                                             (
                                                 NATExamInput(i1, i2, i3),
                                                 NATExamOutput(o1, o2)
+                                            )
+                                         )
+            if NF_MODE == MODE_HALF_NAT:
+                i1, i2, o1, o2 = exam
+                self.example_pairs.append(
+                                            (
+                                                HalfNATExamInput(i1, i2),
+                                                HalfNATExamOutput(o1, o2)
                                             )
                                          )
             elif NF_MODE == MODE_HH:
@@ -180,6 +217,8 @@ class SwitchSimulator:
     def get_output(self, exam_in):
         if NF_MODE == MODE_NAT:
             return self.get_output_nat(exam_in)
+        elif NF_MODE == MODE_HALF_NAT:
+            return self.get_output_half_nat(exam_in)
         elif NF_MODE == MODE_HH:
             return self.get_output_hh(exam_in)
 
@@ -226,6 +265,45 @@ class SwitchSimulator:
                 iter += 1
 
         return NATExamOutput(value_map[1], value_map[2])
+
+    def get_output_half_nat(self, exam_in):
+        src_ip = exam_in.src_ip
+        dst_ip = exam_in.dst_ip
+        nat_src_inside_ip = EXTRA_INPUTS["nat_src_inside_ip"]
+        nat_src_outside_ip = EXTRA_INPUTS["nat_src_outside_ip"]
+
+        # acts as a register
+        value_map = {
+            0 : src_ip,
+            1 : dst_ip,
+            2 : nat_src_inside_ip,
+            3 : nat_src_outside_ip
+        }
+
+        iter = 0
+        while iter < len(self.nodes):
+            if self.primitives[iter].pcode == PRI_ASSIGN:
+                lidx = self.nodes[iter].i_inputs[0]
+                ridx = self.nodes[iter].i_inputs[1]
+                value_map[lidx] = value_map[ridx]
+            elif self.primitives[iter].pcode == PRI_IFEQ:
+                lidx = self.nodes[iter].i_inputs[0]
+                ridx = self.nodes[iter].i_inputs[1]
+                if value_map[lidx] != value_map[ridx]:
+                    # if the condition is not met
+                    level = 0
+                    iter += 1
+                    while self.primitives[iter].pcode != PRI_ENDIF or level != 0:
+                        if self.primitives[iter].pcode == PRI_IFEQ:
+                            level += 1
+                        elif level > 0 and self.primitives[iter].pcode == PRI_ENDIF:
+                            level -= 1
+                        iter += 1
+            if iter < len(self.nodes):
+                iter += 1
+
+        return HalfNATExamOutput(value_map[0], value_map[1])
+
 
     def get_output_hh(self, exam_in):
         src_ip = exam_in.src_ip
@@ -290,6 +368,8 @@ class Phenotype:
     max_arity = MAX_ARITY
     if NF_MODE == MODE_NAT:
         n_inputs = 7
+    elif NF_MODE == MODE_HALF_NAT:
+        n_inputs = 4
     elif NF_MODE == MODE_HH:
         n_inputs = 4
     n_outputs = 1
@@ -328,6 +408,8 @@ class Phenotype:
                 for idx in range(prim.arity):
                     if NF_MODE == MODE_NAT:
                         params.append(INPUT_TXT_NAT[node.i_inputs[idx]])
+                    elif NF_MODE == MODE_HALF_NAT:
+                        params.append(INPUT_TXT_HALF_NAT[node.i_inputs[idx]])
                     elif NF_MODE == MODE_HH:
                         params.append(INPUT_TXT_HH[node.i_inputs[idx]])
                 param_txt = ", ".join(params)
@@ -344,19 +426,21 @@ class Phenotype:
         node.i_pri = random.randint(0, len(self.primitive_set) - 1)
         node.i_prev = random.randint(max(pos - self.level_back,
                                               -self.n_inputs), pos - 1)
-        if node.i_pri != 0 and node.i_pri != 2: # this is not original
-            # original without if
-            for i in range(self.primitive_set[node.i_pri].arity):
-                node.i_inputs[i] = random.randint(0, self.n_inputs - 1)
-        else: # if primitive is IFEQ or IFGT
-            if NF_MODE == MODE_NAT:
-                groups_by_type = [[1,2,3,4], [0,5,6]]
-            elif NF_MODE == MODE_HH:
-                groups_by_type = [[0,1], [2,3]]
-            inputs = random.choice(groups_by_type)
-            pair = random.sample(inputs, k=2)
-            node.i_inputs[0] = pair[0]
-            node.i_inputs[1] = pair[1]
+        # if node.i_pri != 0 and node.i_pri != 2: # this is not original
+        #     # original without if
+        #     for i in range(self.primitive_set[node.i_pri].arity):
+        #         node.i_inputs[i] = random.randint(0, self.n_inputs - 1)
+        # else: # if primitive is IFEQ or IFGT
+        if NF_MODE == MODE_NAT:
+            groups_by_type = [[1,2,3,4], [0,5,6]]
+        elif NF_MODE == MODE_HALF_NAT:
+            groups_by_type = [[0,1,2,3]]
+        elif NF_MODE == MODE_HH:
+            groups_by_type = [[0,1], [2,3]]
+        inputs = random.choice(groups_by_type)
+        pair = random.sample(inputs, k=2)
+        node.i_inputs[0] = pair[0]
+        node.i_inputs[1] = pair[1]
 
         node.i_output = pos
 
@@ -396,15 +480,17 @@ class Phenotype:
         sim = SwitchSimulator(nodes)
 
         if not sim.passed_if_analysis():
-            return -1.0
+            return FV_NOT_PASSED
 
         for ex_pair in self.exam_mgr.example_pairs:
             ex_in, ex_out = ex_pair
             if sim.get_output(ex_in) == ex_out:
                 if NF_MODE == MODE_NAT:
-                    fitness_value += 0.25
+                    fitness_value += FV_NAT
+                elif NF_MODE == MODE_HALF_NAT:
+                    fitness_value += FV_HALF_NAT
                 elif NF_MODE == MODE_HH:
-                    fitness_value += 0.5
+                    fitness_value += FV_HH
 
         return fitness_value
 
@@ -425,22 +511,26 @@ class Phenotype:
                                                   -self.n_inputs), pos - 1)
             # mutate the input genes
             arity = self.primitive_set[node.i_pri].arity
-            if node.i_pri != 0 and node.i_pri != 2:
-                for i in range(arity):
-                    if node.i_inputs[i] is None or random.random() < mut_rate:
-                        igenes_mutated = True
-                        node.i_inputs[i] = random.randint(0, self.n_inputs - 1)
-            else:
-                if (node.i_inputs[0] is None or node.i_inputs[1] is None or
-                                                random.random() < mut_rate):
-                    if NF_MODE == MODE_NAT:
-                        groups_by_type = [[1,2,3,4], [0,5,6]]
-                    elif NF_MODE == MODE_HH:
-                        groups_by_type = [[0,1], [2,3]]
-                    inputs = random.choice(groups_by_type)
-                    pair = random.sample(inputs, k=2)
-                    node.i_inputs[0] = pair[0]
-                    node.i_inputs[1] = pair[1]
+            # if node.i_pri != 0 and node.i_pri != 2:
+            #     for i in range(arity):
+            #         if node.i_inputs[i] is None or random.random() < mut_rate:
+            #             igenes_mutated = True
+            #             node.i_inputs[i] = random.randint(0, self.n_inputs - 1)
+            # else:
+            #     if (node.i_inputs[0] is None or node.i_inputs[1] is None or
+            #                                     random.random() < mut_rate):
+            if (node.i_inputs[0] is None or node.i_inputs[1] is None or
+                                            random.random() < mut_rate):
+                if NF_MODE == MODE_NAT:
+                    groups_by_type = [[1,2,3,4], [0,5,6]]
+                elif NF_MODE == MODE_HALF_NAT:
+                    groups_by_type = [[0,1,2,3]]
+                elif NF_MODE == MODE_HH:
+                    groups_by_type = [[0,1], [2,3]]
+                inputs = random.choice(groups_by_type)
+                pair = random.sample(inputs, k=2)
+                node.i_inputs[0] = pair[0]
+                node.i_inputs[1] = pair[1]
 
             # initially an phenotype is not active except the last output node
             node.active = False
@@ -452,6 +542,12 @@ class Phenotype:
 
 ps = None
 if NF_MODE == MODE_NAT:
+    ps = [
+            Primitive(PRI_IFEQ,     2),
+            Primitive(PRI_ENDIF,    0),
+            Primitive(PRI_ASSIGN,   2),
+        ]
+elif NF_MODE == MODE_HALF_NAT:
     ps = [
             Primitive(PRI_IFEQ,     2),
             Primitive(PRI_ENDIF,    0),
@@ -478,6 +574,7 @@ def evolve(pop, mut_rate, mu, lambda_):
     """
     pop = sorted(pop, key=lambda ind: ind.fitness)  # stable sorting
     parents = pop[-mu:]
+    # parents = random.sample(potential_parents, k=mu)
     fit = [str(ind.fitness) for ind in parents]
     print("  Next generation parents: " + ", ".join(fit))
     # generate lambda new children via mutation
@@ -501,6 +598,8 @@ class CGPSimulator:
         if not exam_fname:
             if NF_MODE == MODE_NAT:
                 exam_fname = "ex_nat.json"
+            elif NF_MODE == MODE_HALF_NAT:
+                exam_fname = "ex_half_nat.json"
             elif NF_MODE == MODE_HH:
                 exam_fname = "ex_hh.json"
         self.exam_mgr = ExamplesManager(exam_fname)
@@ -521,7 +620,7 @@ class CGPSimulator:
             f_vals = [ind.fitness for ind in self.phenotypes]
             print(f"Gen {gen_idx+1}: {f_vals}")
 
-            if abs(self.max_fitness_value - 1.0) < 0.0001:
+            if self.max_fitness_value == 1.0:
                 print("Perfect solution found!")
                 break
 
