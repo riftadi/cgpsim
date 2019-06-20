@@ -4,8 +4,8 @@ import cgp
 
 
 def main():
-    cg_sim = cgp.CGPSimulator(10)
-    cg_sim.evolve_generations(500)
+    cg_sim = cgp.DNCCGPSimulator(40)
+    cg_sim.evolve_generations(200)
     cg_sim.print_fittest_phenotype()
 
 
